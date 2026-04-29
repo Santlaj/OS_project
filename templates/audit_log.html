@@ -3,12 +3,40 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
     <h4 class="fw-bold mb-1"><i class="bi bi-journal-text me-2" style="color:#f59e0b;"></i>Audit Log</h4>
-    <p class="text-muted small mb-0">Recent authentication events on this system</p>
+    <p class="text-muted small mb-0">Recent authentication &amp; security events on this system</p>
   </div>
   <span class="badge bg-warning bg-opacity-10 text-warning px-3 py-2 rounded-pill">
     Last {{ logs|length }} events
   </span>
 </div>
+
+{# ── Summary stats bar ── #}
+{% set ns = namespace(blocked=0, failed=0, success=0) %}
+{% for log in logs %}
+  {% if "[BLOCKED]" in log.event %}{% set ns.blocked = ns.blocked + 1 %}
+  {% elif "Failed" in log.event or "locked" in log.event or "Wrong" in log.event %}{% set ns.failed = ns.failed + 1 %}
+  {% elif "verified" in log.event or "correct" in log.event or "reset" in log.event or "registered" in log.event %}{% set ns.success = ns.success + 1 %}
+  {% endif %}
+{% endfor %}
+{% if logs %}
+<div class="row g-2 mb-3">
+  <div class="col-auto">
+    <span class="badge bg-danger bg-opacity-10 text-danger px-3 py-2 rounded-pill">
+      <i class="bi bi-shield-exclamation me-1"></i>Blocked: {{ ns.blocked }}
+    </span>
+  </div>
+  <div class="col-auto">
+    <span class="badge bg-warning bg-opacity-10 text-warning px-3 py-2 rounded-pill">
+      <i class="bi bi-x-circle me-1"></i>Failed: {{ ns.failed }}
+    </span>
+  </div>
+  <div class="col-auto">
+    <span class="badge bg-success bg-opacity-10 text-success px-3 py-2 rounded-pill">
+      <i class="bi bi-check-circle me-1"></i>Success: {{ ns.success }}
+    </span>
+  </div>
+</div>
+{% endif %}
 
 <div class="card">
   {% if logs %}
@@ -23,18 +51,30 @@
       </thead>
       <tbody>
         {% for log in logs %}
-        <tr>
+        <tr{% if "[BLOCKED]" in log.event %} class="table-danger table-active"{% endif %}>
           <td class="ps-4 py-3 small text-muted" style="white-space:nowrap; font-family:monospace;">{{ log.time }}</td>
           <td class="py-3 small">{{ log.event }}</td>
           <td class="pe-4 py-3">
-            {% if "Failed" in log.event or "locked" in log.event or "Wrong" in log.event %}
-              <span class="badge bg-danger bg-opacity-10 text-danger rounded-pill px-3">Failed</span>
+            {% if "overflow" in log.event|lower %}
+              <span class="badge bg-danger bg-opacity-10 text-danger rounded-pill px-3">
+                <i class="bi bi-bug-fill me-1"></i>Overflow
+              </span>
+            {% elif "trapdoor" in log.event|lower or "Suspicious" in log.event %}
+              <span class="badge bg-danger bg-opacity-10 text-danger rounded-pill px-3">
+                <i class="bi bi-shield-exclamation me-1"></i>Trapdoor
+              </span>
+            {% elif "[BLOCKED]" in log.event %}
+              <span class="badge bg-danger bg-opacity-10 text-danger rounded-pill px-3">
+                <i class="bi bi-ban me-1"></i>Blocked
+              </span>
+            {% elif "Failed" in log.event or "locked" in log.event or "Wrong" in log.event %}
+              <span class="badge bg-warning bg-opacity-10 text-warning rounded-pill px-3">Failed</span>
             {% elif "verified" in log.event or "correct" in log.event or "reset" in log.event %}
               <span class="badge bg-success bg-opacity-10 text-success rounded-pill px-3">Success</span>
             {% elif "registered" in log.event %}
               <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-3">Register</span>
             {% elif "revoked" in log.event %}
-              <span class="badge bg-warning bg-opacity-10 text-warning rounded-pill px-3">Session</span>
+              <span class="badge bg-secondary bg-opacity-10 text-secondary rounded-pill px-3">Session</span>
             {% else %}
               <span class="badge bg-secondary bg-opacity-10 text-secondary rounded-pill px-3">Info</span>
             {% endif %}
@@ -58,3 +98,4 @@
   </a>
 </div>
 {% endblock %}
+

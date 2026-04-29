@@ -12,7 +12,8 @@ from security import (
     generate_otp, verify_otp,
     log_event, send_email_otp,
     generate_reset_token, send_reset_email,
-    generate_qr_code
+    generate_qr_code,
+    validate_and_sanitize, validate_otp_format, validate_reset_token_format
 )
 
 app = Flask(__name__)
@@ -32,11 +33,19 @@ def home():
 def register():
     error = None
     if request.method == "POST":
-        username = request.form["username"]
+        username = request.form["username"].strip()
         password = request.form["password"]
-        email = request.form["email"]
+        email = request.form["email"].strip()
 
-        if get_user(username):
+        # --- Input validation (overflow + trapdoor protection) ---
+        val_err = validate_and_sanitize({
+            "username": username,
+            "email":    email,
+            "password": password,
+        })
+        if val_err:
+            error = val_err
+        elif get_user(username):
             error = "Username already exists."
         else:
             hashed = hash_password(password)
@@ -54,8 +63,18 @@ def register():
 def login():
     error = None
     if request.method == "POST":
-        username = request.form["username"]
+        username = request.form["username"].strip()
         password = request.form["password"]
+
+        # --- Input validation (overflow + trapdoor protection) ---
+        val_err = validate_and_sanitize({
+            "username": username,
+            "password": password,
+        })
+        if val_err:
+            error = val_err
+            return render_template("login.html", error=error)
+
         user = get_user(username)
 
         if not user:
@@ -90,19 +109,25 @@ def otp():
         return redirect("/login")
     error = None
     if request.method == "POST":
-        otp_input = request.form["otp"]
-        secret = session.get("otp_secret")
-        if verify_otp(secret, otp_input):
-            username = session["username"]
-            ip = request.remote_addr
-            browser = request.user_agent.string[:120]
-            sid = create_session(username, ip, browser)
-            session["session_id"] = sid
-            log_event(f"OTP verified for {username} from {ip}")
-            return redirect("/dashboard")
+        otp_input = request.form["otp"].strip()
+
+        # --- OTP format validation (overflow + trapdoor protection) ---
+        val_err = validate_otp_format(otp_input)
+        if val_err:
+            error = val_err
         else:
-            error = "Invalid or expired OTP. Try again."
-            log_event(f"Wrong OTP attempt for {session.get('username')}")
+            secret = session.get("otp_secret")
+            if verify_otp(secret, otp_input):
+                username = session["username"]
+                ip = request.remote_addr
+                browser = request.user_agent.string[:120]
+                sid = create_session(username, ip, browser)
+                session["session_id"] = sid
+                log_event(f"OTP verified for {username} from {ip}")
+                return redirect("/dashboard")
+            else:
+                error = "Invalid or expired OTP. Try again."
+                log_event(f"Wrong OTP attempt for {session.get('username')}")
 
     return render_template("otp.html", error=error)
 
@@ -162,8 +187,16 @@ def setup_2fa():
 @app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
     message = None
+    error = None
     if request.method == "POST":
-        email = request.form["email"]
+        email = request.form["email"].strip()
+
+        # --- Input validation (overflow + trapdoor protection) ---
+        val_err = validate_and_sanitize({"email": email})
+        if val_err:
+            error = val_err
+            return render_template("forgot_password.html", message=None, error=error)
+
         user = get_user_by_email(email)
         if user:
             token = generate_reset_token()
@@ -172,11 +205,16 @@ def forgot_password():
             send_reset_email(email, reset_link)
             log_event(f"Password reset requested for {user['username']}")
         message = "If that email exists, a reset link has been sent."
-    return render_template("forgot_password.html", message=message)
+    return render_template("forgot_password.html", message=message, error=error)
 
 
 @app.route("/reset_password/<token>", methods=["GET", "POST"])
 def reset_password(token):
+    # --- Validate the token format before any DB lookup ---
+    token_err = validate_reset_token_format(token)
+    if token_err:
+        return render_template("reset_password.html", invalid=True)
+
     record = get_reset_token(token)
     error = None
 
@@ -191,7 +229,12 @@ def reset_password(token):
     if request.method == "POST":
         new_password = request.form["password"]
         confirm = request.form["confirm"]
-        if new_password != confirm:
+
+        # --- Input validation (overflow + trapdoor protection) ---
+        val_err = validate_and_sanitize({"password": new_password})
+        if val_err:
+            error = val_err
+        elif new_password != confirm:
             error = "Passwords do not match."
         elif len(new_password) < 6:
             error = "Password must be at least 6 characters."
@@ -226,7 +269,7 @@ def audit_log():
     return render_template("audit_log.html", logs=logs)
 
 
-# ================= LOGOUT =================
+#  LOGOUT 
 
 @app.route("/logout")
 def logout():
@@ -238,6 +281,3 @@ def logout():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5002)
-    
-
-
