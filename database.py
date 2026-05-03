@@ -75,6 +75,15 @@ def get_active_sessions(username):
     res = supabase.table("sessions").select("*").eq("username", username).eq("active", 1).order("login_time", desc=True).execute()
     return res.data
 
+def is_session_active(session_id):
+    """Check if a session is still active (not revoked) in the database."""
+    if not supabase or not session_id:
+        return False
+    res = supabase.table("sessions").select("active").eq("id", session_id).execute()
+    if res.data and res.data[0]["active"] == 1:
+        return True
+    return False
+
 def revoke_session(session_id, username):
     if not supabase: return
     supabase.table("sessions").update({"active": 0}).eq("id", session_id).eq("username", username).execute()

@@ -51,7 +51,13 @@
       </thead>
       <tbody>
         {% for log in logs %}
-        <tr{% if "[BLOCKED]" in log.event %} class="table-danger table-active"{% endif %}>
+        <tr class="
+          {%- if '[BLOCKED]' in log.event %}table-danger table-active
+          {%- elif 'Failed' in log.event or 'locked' in log.event or 'Wrong' in log.event %}table-warning
+          {%- elif 'verified' in log.event or 'correct' in log.event or 'reset' in log.event or 'registered' in log.event %}table-success
+          {%- elif 'revoked' in log.event %}table-info
+          {%- endif -%}
+        ">
           <td class="ps-4 py-3 small text-muted" style="white-space:nowrap; font-family:monospace;">{{ log.time }}</td>
           <td class="py-3 small">{{ log.event }}</td>
           <td class="pe-4 py-3">
@@ -74,7 +80,7 @@
             {% elif "registered" in log.event %}
               <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-3">Register</span>
             {% elif "revoked" in log.event %}
-              <span class="badge bg-secondary bg-opacity-10 text-secondary rounded-pill px-3">Session</span>
+              <span class="badge bg-info bg-opacity-10 text-info rounded-pill px-3">Session</span>
             {% else %}
               <span class="badge bg-secondary bg-opacity-10 text-secondary rounded-pill px-3">Info</span>
             {% endif %}

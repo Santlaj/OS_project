@@ -5,6 +5,7 @@ from database import (
     create_db, add_user, get_user, get_user_by_email,
     update_attempts, lock_user, update_password,
     create_session, get_active_sessions, revoke_session, revoke_all_sessions,
+    is_session_active,
     save_reset_token, get_reset_token, mark_token_used
 )
 from security import (
@@ -20,6 +21,23 @@ app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
 create_db()
+
+# --- Validate session on every request (enforces remote session revocation) ---
+SKIP_SESSION_CHECK = {"/login", "/register", "/logout", "/forgot_password", "/", "/otp"}
+
+@app.before_request
+def check_session_validity():
+    # Skip static files and public routes
+    if request.path.startswith("/static") or request.path.startswith("/reset_password"):
+        return
+    if request.path in SKIP_SESSION_CHECK:
+        return
+    # If the user is logged in, verify their session is still active in DB
+    sid = session.get("session_id")
+    if sid is not None:
+        if not is_session_active(sid):
+            session.clear()
+            return redirect("/login")
 
 
 @app.route("/")
