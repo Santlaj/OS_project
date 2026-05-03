@@ -111,3 +111,15 @@ def get_reset_token(token):
 def mark_token_used(token):
     if not supabase: return
     supabase.table("reset_tokens").update({"used": 1}).eq("token", token).execute()
+
+# Audit Logs
+def log_audit_event(message):
+    if not supabase: return
+    supabase.table("audit_logs").insert({
+        "event": message
+    }).execute()
+
+def get_audit_logs():
+    if not supabase: return []
+    res = supabase.table("audit_logs").select("*").order("created_at", desc=True).limit(200).execute()
+    return res.data

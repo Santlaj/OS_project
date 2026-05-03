@@ -12,6 +12,7 @@ import qrcode
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
+import database
 
 load_dotenv()
 
@@ -283,3 +284,7 @@ def generate_qr_code(username, secret):
 
 def log_event(message):
     auth_logger.info(message)
+    try:
+        database.log_audit_event(message)
+    except Exception as e:
+        auth_logger.error(f"Failed to log to Supabase: {e}")

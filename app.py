@@ -6,7 +6,8 @@ from database import (
     update_attempts, lock_user, update_password,
     create_session, get_active_sessions, revoke_session, revoke_all_sessions,
     is_session_active,
-    save_reset_token, get_reset_token, mark_token_used
+    save_reset_token, get_reset_token, mark_token_used,
+    get_audit_logs
 )
 from security import (
     hash_password, check_password,
@@ -272,18 +273,16 @@ def reset_password(token):
 def audit_log():
     if "username" not in session:
         return redirect("/login")
+    
+    db_logs = get_audit_logs()
     logs = []
-    try:
-        with open("logs/auth.log", "r") as f:
-            lines = f.readlines()
-            for line in reversed(lines[-200:]):
-                line = line.strip()
-                if line and " - " in line:
-                    parts = line.split(" - ", 1)
-                    if len(parts) == 2:
-                        logs.append({"time": parts[0], "event": parts[1]})
-    except FileNotFoundError:
-        pass
+    if db_logs:
+        for row in db_logs:
+            dt = row.get("created_at", "")
+            if "T" in dt:
+                dt = dt.replace("T", " ")[:19]
+            logs.append({"time": dt, "event": row.get("event", "Unknown Event")})
+            
     return render_template("audit_log.html", logs=logs)
 
 
