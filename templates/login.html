@@ -10,7 +10,36 @@
     <div class="card p-4">
       {% if error %}
       <div class="alert alert-danger d-flex align-items-center gap-2 py-2" role="alert">
-        <i class="bi bi-exclamation-triangle-fill"></i> {{ error }}
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <div>
+          <span>{{ error }}</span>
+          {% if remaining %}
+          <div class="fw-bold mt-1 text-danger" style="font-size: 0.85rem;" id="timerContainer">
+            Time remaining: <span id="countdown"></span>
+          </div>
+          <script>
+            let timeLeft = parseInt("{{ remaining }}", 10);
+            const countdownEl = document.getElementById('countdown');
+            const timer = setInterval(() => {
+              if (timeLeft <= 0) {
+                clearInterval(timer);
+                document.getElementById('timerContainer').innerHTML = "<a href='/login' class='text-danger text-decoration-underline'>Refresh page to try again</a>";
+              } else {
+                let mins = Math.floor(timeLeft / 60);
+                let secs = timeLeft % 60;
+                countdownEl.textContent = mins + "m " + (secs < 10 ? "0" : "") + secs + "s";
+                timeLeft--;
+              }
+            }, 1000);
+            
+            // Initial render
+            let initialMins = Math.floor(timeLeft / 60);
+            let initialSecs = timeLeft % 60;
+            countdownEl.textContent = initialMins + "m " + (initialSecs < 10 ? "0" : "") + initialSecs + "s";
+            timeLeft--;
+          </script>
+          {% endif %}
+        </div>
       </div>
       {% endif %}
       <form method="POST">

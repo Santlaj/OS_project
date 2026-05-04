@@ -3,16 +3,15 @@ import pyotp
 import datetime
 from database import (
     create_db, add_user, get_user, get_user_by_email,
-    update_attempts, lock_user, update_password,
+    update_attempts, lock_user, unlock_user, update_password,
     create_session, get_active_sessions, revoke_session, revoke_all_sessions,
-    is_session_active,
+    is_session_active, mark_totp_confirmed,
     save_reset_token, get_reset_token, mark_token_used,
     get_audit_logs
 )
 from security import (
     hash_password, check_password,
-    generate_otp, verify_otp,
-    log_event, send_email_otp,
+    verify_otp, log_event,
     generate_reset_token, send_reset_email,
     generate_qr_code,
     validate_and_sanitize, validate_otp_format, validate_reset_token_format
@@ -66,12 +65,15 @@ def register():
             error = val_err
         elif get_user(username):
             error = "Username already exists."
+        elif get_user_by_email(email):
+            error = "Email already registered."
         else:
             hashed = hash_password(password)
             otp_secret = pyotp.random_base32()
             add_user(username, hashed, email, otp_secret)
             log_event(f"New user registered: {username}")
-            return redirect("/login")
+            session["setup_username"] = username
+            return redirect("/setup_2fa")
 
     return render_template("register.html", error=error)
 
@@ -81,6 +83,7 @@ def register():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
+    remaining_time = None
     if request.method == "POST":
         username = request.form["username"].strip()
         password = request.form["password"]
@@ -98,33 +101,59 @@ def login():
 
         if not user:
             error = "Invalid username or password."
-        elif user["locked"] == 1:
-            error = "Account locked due to too many failed attempts."
-        elif check_password(password, user["password"]):
-            session["username"] = username
-            session["otp_secret"] = user["otp_secret"]
-            otp = generate_otp(user["otp_secret"])
-            send_email_otp(user["email"], otp)
-            log_event(f"Password correct for {username}")
-            return redirect("/otp")
         else:
-            attempts = user["attempts"] + 1
-            update_attempts(username, attempts)
-            if attempts >= 3:
-                lock_user(username)
-                error = "Account locked due to too many failed attempts."
-            else:
-                error = f"Invalid username or password. ({3 - attempts} attempts left)"
-            log_event(f"Failed login for {username}")
+            if user["locked"] == 1:
+                locked_until_str = user.get("locked_until")
+                if locked_until_str:
+                    try:
+                        dt_until = datetime.datetime.fromisoformat(locked_until_str.replace("Z", "+00:00"))
+                        now_utc = datetime.datetime.now(datetime.timezone.utc)
+                        if now_utc >= dt_until:
+                            unlock_user(username)
+                            user["locked"] = 0
+                            user["attempts"] = 0
+                        else:
+                            remaining_time = int((dt_until - now_utc).total_seconds())
+                            error = "Account blocked due to too many failed attempts."
+                    except Exception:
+                        unlock_user(username)
+                        user["locked"] = 0
+                        user["attempts"] = 0
+                else:
+                    unlock_user(username)
+                    user["locked"] = 0
+                    user["attempts"] = 0
 
-    return render_template("login.html", error=error)
+            if user["locked"] == 0:
+                if check_password(password, user["password"]):
+                    if not user.get("totp_confirmed"):
+                        session["setup_username"] = username
+                        log_event(f"Password correct but 2FA not set up for {username}")
+                        return redirect("/setup_2fa")
+
+                    session["pending_username"] = username
+                    session["otp_secret"] = user["otp_secret"]
+                    log_event(f"Password correct for {username}")
+                    return redirect("/otp")
+                else:
+                    attempts = user["attempts"] + 1
+                    update_attempts(username, attempts)
+                    if attempts >= 3:
+                        lock_user(username)
+                        error = "Account blocked due to too many failed attempts."
+                        remaining_time = 180
+                    else:
+                        error = f"Invalid username or password. ({3 - attempts} attempts left)"
+                    log_event(f"Failed login for {username}")
+
+    return render_template("login.html", error=error, remaining=remaining_time)
 
 
 # ================= OTP =================
 
 @app.route("/otp", methods=["GET", "POST"])
 def otp():
-    if "username" not in session:
+    if "pending_username" not in session:
         return redirect("/login")
     error = None
     if request.method == "POST":
@@ -137,16 +166,19 @@ def otp():
         else:
             secret = session.get("otp_secret")
             if verify_otp(secret, otp_input):
-                username = session["username"]
+                username = session["pending_username"]
                 ip = request.remote_addr
                 browser = request.user_agent.string[:120]
                 sid = create_session(username, ip, browser)
                 session["session_id"] = sid
+                session["username"] = username
+                session.pop("pending_username", None)
+                session.pop("otp_secret", None)
                 log_event(f"OTP verified for {username} from {ip}")
                 return redirect("/dashboard")
             else:
-                error = "Invalid or expired OTP. Try again."
-                log_event(f"Wrong OTP attempt for {session.get('username')}")
+                error = "Invalid or expired code. Try again."
+                log_event(f"Wrong OTP attempt for {session.get('pending_username')}")
 
     return render_template("otp.html", error=error)
 
@@ -191,14 +223,37 @@ def revoke_all():
 
 # ================= QR CODE / 2FA SETUP =================
 
-@app.route("/setup_2fa")
+@app.route("/setup_2fa", methods=["GET", "POST"])
 def setup_2fa():
-    if "username" not in session:
+    username = session.get("setup_username") or session.get("username")
+    if not username:
         return redirect("/login")
-    user = get_user(session["username"])
-    qr_b64 = generate_qr_code(session["username"], user["otp_secret"])
+        
+    user = get_user(username)
+    if not user:
+        return redirect("/login")
+        
+    error = None
+    if request.method == "POST":
+        otp_input = request.form.get("otp", "").strip()
+        val_err = validate_otp_format(otp_input)
+        if val_err:
+            error = val_err
+        elif verify_otp(user["otp_secret"], otp_input):
+            mark_totp_confirmed(username)
+            log_event(f"TOTP confirmed and set up for {username}")
+            if "setup_username" in session:
+                session.pop("setup_username", None)
+                return redirect("/login")
+            else:
+                return redirect("/dashboard")
+        else:
+            error = "Invalid code. Try again."
+            log_event(f"Failed TOTP setup attempt for {username}")
+
+    qr_b64 = generate_qr_code(username, user["otp_secret"])
     secret = user["otp_secret"]
-    return render_template("setup_2fa.html", qr_b64=qr_b64, secret=secret)
+    return render_template("setup_2fa.html", qr_b64=qr_b64, secret=secret, error=error)
 
 
 # ================= PASSWORD RESET =================
@@ -278,9 +333,14 @@ def audit_log():
     logs = []
     if db_logs:
         for row in db_logs:
-            dt = row.get("created_at", "")
-            if "T" in dt:
-                dt = dt.replace("T", " ")[:19]
+            dt_str = row.get("created_at", "")
+            try:
+                # Parse Supabase UTC time and convert to IST (+5:30)
+                dt_obj = datetime.datetime.strptime(dt_str[:19], "%Y-%m-%dT%H:%M:%S")
+                dt_obj += datetime.timedelta(hours=5, minutes=30)
+                dt = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                dt = dt_str.replace("T", " ")[:19]
             logs.append({"time": dt, "event": row.get("event", "Unknown Event")})
             
     return render_template("audit_log.html", logs=logs)

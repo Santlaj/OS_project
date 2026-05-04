@@ -17,7 +17,9 @@ else:
     supabase = None
 
 def create_db():
-    # Tables are created manually in Supabase SQL Editor
+    # Tables are created manually in Supabase SQL Editor.
+    # IMPORTANT: The 'users' table must have an integer column 'totp_confirmed' 
+    # (default 0) to track 2FA onboarding status.
     pass
 
 def get_user(username):
@@ -38,8 +40,13 @@ def add_user(username, password, email, otp_secret):
         "email": email,
         "otp_secret": otp_secret,
         "attempts": 0,
-        "locked": 0
+        "locked": 0,
+        "totp_confirmed": 0
     }).execute()
+
+def mark_totp_confirmed(username):
+    if not supabase: return
+    supabase.table("users").update({"totp_confirmed": 1}).eq("username", username).execute()
 
 def update_attempts(username, attempts):
     if not supabase: return
@@ -47,14 +54,20 @@ def update_attempts(username, attempts):
 
 def lock_user(username):
     if not supabase: return
-    supabase.table("users").update({"locked": 1}).eq("username", username).execute()
+    unlock_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=3)).isoformat()
+    supabase.table("users").update({"locked": 1, "locked_until": unlock_time}).eq("username", username).execute()
+
+def unlock_user(username):
+    if not supabase: return
+    supabase.table("users").update({"locked": 0, "attempts": 0, "locked_until": None}).eq("username", username).execute()
 
 def update_password(username, new_hashed):
     if not supabase: return
     supabase.table("users").update({
         "password": new_hashed,
         "attempts": 0,
-        "locked": 0
+        "locked": 0,
+        "locked_until": None
     }).eq("username", username).execute()
 
 # Sessions

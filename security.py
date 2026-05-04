@@ -31,10 +31,7 @@ auth_logger.addHandler(_file_handler)
 auth_logger.propagate = False  # don't send to root logger
 
 
-# ================================================================
 # INPUT LENGTH LIMITS  (simulate buffer-overflow protection)
-# ================================================================
-
 INPUT_LIMITS = {
     "username":  32,
     "email":     120,
@@ -43,13 +40,11 @@ INPUT_LIMITS = {
     "token":     64,     # reset-token URL param
 }
 
-# ================================================================
 # SUSPICIOUS PATTERN DETECTION  (trapdoor / backdoor protection)
-# ================================================================
 
 # Compiled once at import time for performance
 _SUSPICIOUS_PATTERNS = [
-    # Null bytes
+
     re.compile(r"\x00"),
     # SQL injection fragments
     re.compile(r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|EXEC|EXECUTE)\b"
@@ -96,10 +91,7 @@ def _contains_suspicious_patterns(value):
     return None
 
 
-# ================================================================
 # PUBLIC VALIDATION API  (called from app.py routes)
-# ================================================================
-
 def validate_input_length(value, field_name):
     """Check value length against INPUT_LIMITS.
 
@@ -187,10 +179,7 @@ def validate_reset_token_format(token_value):
     return None
 
 
-# ================================================================
 # ORIGINAL HELPER FUNCTIONS  (unchanged)
-# ================================================================
-
 SMTP_TIMEOUT = 10  # seconds – fail fast instead of blocking the worker
 
 
