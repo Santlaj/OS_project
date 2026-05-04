@@ -223,12 +223,19 @@ This link is valid for 15 minutes. If you did not request this, ignore this emai
 - SecureAuth System
 """
         msg.attach(MIMEText(body, "plain"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=SMTP_TIMEOUT) as server:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=SMTP_TIMEOUT) as server:
+            server.starttls()
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             server.send_message(msg)
         log_event(f"Reset email sent to {to_email}")
     except Exception as e:
         log_event(f"Reset email FAILED for {to_email}: {e}")
+        # DEVELOPMENT FALLBACK: Print the link to the console so the user can test the flow locally
+        print("\n" + "="*50)
+        print(f"⚠️ SMTP FAILED (Network Unreachable)")
+        print(f"DEVELOPMENT MODE FALLBACK - RESET LINK FOR {to_email}:")
+        print(f"{reset_link}")
+        print("="*50 + "\n")
 
 
 def send_reset_email(to_email, reset_link):
